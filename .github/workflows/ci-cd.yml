@@ -1,0 +1,164 @@
+name: CI/CD Pipeline - TallerAPI
+
+# -----------------------------------------------------------------------
+# DISPARO: solo en push a main.
+# No se dispara en pull_request para no gastar minutos de Actions ni
+# intentar desplegar código que todavía no se ha fusionado (RN explícita
+# de la fase: "no en cada PR a ramas de feature").
+# -----------------------------------------------------------------------
+on:
+  push:
+    branches:
+      - main
+
+# Token de GITHUB_TOKEN con permisos mínimos (solo lectura del repo).
+# Este workflow no escribe en el repo ni crea releases, así que no
+# necesita más permisos que este.
+permissions:
+  contents: read
+
+# Si llegan dos push a main muy seguidos, se encolan en vez de cancelarse:
+# cancelar un "deploy" a mitad de ejecución podría dejar Elastic Beanstalk
+# en un estado de despliegue a medias.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+# -----------------------------------------------------------------------
+# Variables no sensibles, iguales para todos los jobs.
+# IMPORTANTE: ajustar estos 4 valores a los nombres reales creados a mano
+# en la Fase 4 (revisar con `aws elasticbeanstalk describe-environments`
+# y `aws ecr describe-repositories` si hay dudas).
+# -----------------------------------------------------------------------
+env:
+  AWS_REGION: eu-west-1
+  ECR_REPOSITORY: tallerapi
+  EB_ENVIRONMENT_NAME: tallerapi-prod
+
+jobs:
+  # =======================================================================
+  # JOB 1 — test
+  # Ejecuta la suite completa (94 tests). Si falla, los jobs siguientes
+  # ni siquiera se encolan: ver fase5-notas-tecnicas.md para el detalle
+  # de cómo "needs:" implementa el fail-fast.
+  # =======================================================================
+  test:
+    name: Ejecutar suite de tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout del código
+        uses: actions/checkout@v4
+
+      - name: Configurar JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: 'maven' # cachea ~/.m2/repository entre ejecuciones del workflow
+
+      - name: mvn test (47 unitarios + 47 integración)
+        run: mvn test --batch-mode --no-transfer-progress
+
+  # =======================================================================
+  # JOB 2 — build-and-push
+  # Solo se ejecuta si "test" terminó en verde (needs: test).
+  # Construye la imagen con el Dockerfile ya existente (sin tocarlo) y la
+  # sube a ECR con dos tags: el SHA corto del commit (trazabilidad) y
+  # "latest" (referencia rápida, no se usa para el deploy).
+  # =======================================================================
+  build-and-push:
+    name: Construir imagen Docker y subir a ECR
+    runs-on: ubuntu-latest
+    needs: test
+    outputs:
+      image_tag: ${{ steps.vars.outputs.short_sha }}
+    steps:
+      - name: Checkout del código
+        uses: actions/checkout@v4
+
+      - name: Calcular SHA corto del commit
+        id: vars
+        run: echo "short_sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      # El usuario IAM de CI/CD (ver fase5-guia-secretos-iam.md) solo tiene
+      # permisos de ECR push/pull y de despliegue en EB — nunca AdministratorAccess.
+      - name: Configurar credenciales AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_CICD }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_CICD }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login en Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build de la imagen Docker
+        run: docker build -t "${{ env.ECR_REPOSITORY }}:${{ steps.vars.outputs.short_sha }}" .
+
+      - name: Tag y push a ECR (SHA + latest)
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+        run: |
+          IMAGE_SHA="${ECR_REGISTRY}/${{ env.ECR_REPOSITORY }}:${{ steps.vars.outputs.short_sha }}"
+          IMAGE_LATEST="${ECR_REGISTRY}/${{ env.ECR_REPOSITORY }}:latest"
+
+          docker tag "${{ env.ECR_REPOSITORY }}:${{ steps.vars.outputs.short_sha }}" "$IMAGE_SHA"
+          docker tag "${{ env.ECR_REPOSITORY }}:${{ steps.vars.outputs.short_sha }}" "$IMAGE_LATEST"
+
+          docker push "$IMAGE_SHA"
+          docker push "$IMAGE_LATEST"
+
+  # =======================================================================
+  # JOB 3 — deploy
+  # Solo se ejecuta si "build-and-push" terminó bien (needs: build-and-push).
+  # Asume que tallerapi-prod (EB) y tallerapi-db (RDS) YA EXISTEN. Si están
+  # detenidos/terminados entre sesiones, este job falla — comportamiento
+  # esperado y documentado, no un bug del pipeline (ver notas técnicas).
+  # =======================================================================
+  deploy:
+    name: Desplegar en Elastic Beanstalk
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    steps:
+      - name: Checkout del código
+        uses: actions/checkout@v4
+
+      - name: Configurar credenciales AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_CICD }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_CICD }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolver URI del registro ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # No se modifica el Dockerrun.aws.json versionado en el repo: se genera
+      # una copia temporal solo para este despliegue, apuntando a la imagen
+      # con el tag del commit (en vez de "latest") para que cada despliegue
+      # en EB quede trazado a un commit concreto. Ver fase5-notas-tecnicas.md.
+      - name: Fijar el tag del commit en Dockerrun.aws.json (copia temporal)
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
+        run: |
+          jq --arg image "${ECR_REGISTRY}/${{ env.ECR_REPOSITORY }}:${IMAGE_TAG}" \
+            '.Image.Name = $image' Dockerrun.aws.json > Dockerrun.aws.json.tmp
+          mv Dockerrun.aws.json.tmp Dockerrun.aws.json
+
+      - name: Instalar EB CLI
+        run: pip install awsebcli --upgrade --user
+
+      # Requiere que .elasticbeanstalk/config.yml (creado por `eb init` en la
+      # Fase 4) esté commiteado en el repo, con application_name y
+      # default_region correctos. Sin ese fichero, `eb deploy` pediría
+      # respuestas interactivas y el job se quedaría colgado. Ver
+      # fase5-notas-tecnicas.md, sección "Pasos manuales pendientes".
+      - name: eb deploy
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          eb deploy "${{ env.EB_ENVIRONMENT_NAME }}" \
+            --label "gh-${{ needs.build-and-push.outputs.image_tag }}" \
+            --timeout 15
