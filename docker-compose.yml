@@ -1,0 +1,82 @@
+# =============================================================
+# docker-compose.yml - TallerAPI
+# Fase 3 — Dockerización
+#
+# Sustituye al docker-compose.yml mínimo de la Fase 1 (que solo
+# levantaba PostgreSQL). Ahora levanta el stack completo para
+# desarrollo local: la propia API (servicio "app", construida con el
+# Dockerfile de este mismo directorio) y su base de datos PostgreSQL
+# (servicio "db").
+#
+# Todas las variables sensibles se leen de un fichero .env (no
+# versionado) que cada desarrollador crea a partir de .env.example.
+# Nada de credenciales ni secretos queda escrito en este fichero.
+# =============================================================
+
+services:
+
+  db:
+    image: postgres:16-alpine
+    container_name: tallerapi-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-tallerapi}
+      POSTGRES_USER: ${DB_USERNAME:-tallerapi}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Debes definir DB_PASSWORD en tu fichero .env}
+    ports:
+      - "5432:5432"
+    volumes:
+      - tallerapi-db-data:/var/lib/postgresql/data
+    # Healthcheck heredado de la Fase 1: pg_isready comprueba que
+    # PostgreSQL está realmente aceptando conexiones, no solo que el
+    # proceso del contenedor existe.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-tallerapi} -d ${DB_NAME:-tallerapi}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tallerapi-app
+    restart: unless-stopped
+    # No basta con "depends_on: [db]" a secas: eso solo esperaría a
+    # que el CONTENEDOR de db arrancase, no a que PostgreSQL estuviera
+    # listo para aceptar conexiones. Con "condition: service_healthy",
+    # Docker Compose no inicia "app" hasta que el healthcheck de "db"
+    # (arriba) responda correctamente. Esto evita que Flyway intente
+    # conectarse y migrar el esquema antes de que la base de datos
+    # esté realmente disponible. Más detalle en
+    # fase3-notas-tecnicas.md.
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+      # Apuntamos al servicio "db" por su nombre de servicio en la red
+      # interna de Compose, no a "localhost" (ese valor por defecto en
+      # application.yml es solo para ejecutar la app fuera de Docker).
+      DB_URL: jdbc:postgresql://db:5432/${DB_NAME:-tallerapi}
+      DB_USERNAME: ${DB_USERNAME:-tallerapi}
+      DB_PASSWORD: ${DB_PASSWORD:?Debes definir DB_PASSWORD en tu fichero .env}
+      JWT_SECRET: ${JWT_SECRET:?Debes definir JWT_SECRET en tu fichero .env}
+      JWT_EXPIRATION_MS: ${JWT_EXPIRATION_MS:-3600000}
+    ports:
+      - "8080:8080"
+    # Comprueba /actuator/health (Spring Boot Actuator). Requiere que
+    # ese endpoint esté permitido sin autenticación en SecurityConfig
+    # — ver "ACCIÓN MANUAL REQUERIDA" en fase3-notas-tecnicas.md.
+    # wget viene incluido en la imagen base (BusyBox de Alpine), así
+    # que no hace falta instalar nada adicional.
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8080/actuator/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  tallerapi-db-data:

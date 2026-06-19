@@ -1,0 +1,12 @@
+# Reduce el contexto que se envía al "docker build" y evita que se
+# arrastren artefactos locales irrelevantes (o sensibles) a la imagen.
+
+target/
+.git/
+.gitignore
+.idea/
+*.iml
+.env
+*.log
+README*.md
+*-notas-tecnicas.md
