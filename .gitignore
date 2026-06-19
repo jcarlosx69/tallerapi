@@ -39,3 +39,4 @@ build/
 !.elasticbeanstalk/config.yml
 .env
 
+credencialesUsuarioAWS.txt

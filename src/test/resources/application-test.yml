@@ -1,0 +1,42 @@
+# =============================================================
+# application-test.yml
+# Perfil activo SOLO durante los tests de integración de Fase 2d-2
+# (@ActiveProfiles("test") en IntegrationTestBase).
+#
+# Decisión de diseño (ver fase2d2-notas-tecnicas.md, sección 2):
+# los repositorios se mockean con @MockBean, así que NO hace falta
+# una base de datos real ni un H2/Testcontainers para estos tests.
+# Pero @SpringBootTest con WebEnvironment.MOCK carga el contexto
+# COMPLETO de la aplicación por defecto, lo que incluiría intentar
+# configurar un DataSource real y ejecutar las migraciones de
+# Flyway contra él. Se excluyen explícitamente las clases de
+# autoconfiguración correspondientes para evitarlo:
+#
+# - DataSourceAutoConfiguration / DataSourceTransactionManagerAutoConfiguration:
+#     no crean ningún DataSource ni TransactionManager basado en JDBC.
+# - HibernateJpaAutoConfiguration:
+#     no crea un EntityManagerFactory (no hay JPA real en estos tests).
+# - JpaRepositoriesAutoConfiguration:
+#     no intenta generar implementaciones reales de los @Repository
+#     a partir de un EntityManager. Esto es seguro porque @MockBean,
+#     en cada test, registra explícitamente un bean mock para cada
+#     interfaz de repositorio que la aplicación necesita — no
+#     dependemos de esta autoconfiguración para que esos beans existan.
+# - FlywayAutoConfiguration:
+#     no ejecuta ninguna migración (no hay DataSource contra el que
+#     ejecutarla).
+# =============================================================
+
+spring:
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceTransactionManagerAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.jpa.JpaRepositoriesAutoConfiguration
+      - org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration
+
+logging:
+  level:
+    com.delamaderaalcodigo.tallerapi: INFO
+    org.springframework.security: WARN

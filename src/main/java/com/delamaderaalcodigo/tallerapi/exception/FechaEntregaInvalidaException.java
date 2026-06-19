@@ -11,6 +11,7 @@ package com.delamaderaalcodigo.tallerapi.exception;
 public class FechaEntregaInvalidaException extends RuntimeException {
 
     public FechaEntregaInvalidaException(String message) {
+
         super(message);
     }
 }
