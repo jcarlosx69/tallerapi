@@ -1,0 +1,33 @@
+%% Justificación del tipo de diagrama
+%% -----------------------------------
+%% Se eligió un flowchart en lugar de un diagrama de secuencia porque el objetivo es comunicar
+%% la TOPOLOGÍA de componentes (cliente, infraestructura en AWS, pipeline de CI/CD) y cómo se
+%% relacionan entre sí, no el orden temporal de mensajes entre actores. Los subgraphs permiten
+%% agrupar visualmente el pipeline de despliegue y la infraestructura en ejecución en bloques
+%% diferenciados sin perder claridad: algo que un sequence diagram, pensado para interacciones
+%% punto a punto en el tiempo, no comunica bien para una arquitectura de este tamaño.
+
+flowchart TB
+    subgraph CLIENTE["Cliente"]
+        SW["Swagger UI / Postman"]
+    end
+
+    subgraph CICD["Pipeline CI/CD — GitHub Actions"]
+        direction LR
+        PUSH["Push a main"] --> TEST["Job: test"]
+        TEST --> BUILD["Job: build-and-push"]
+        BUILD --> DEPLOY["Job: deploy"]
+    end
+
+    subgraph AWS["AWS"]
+        direction TB
+        ECR[("Amazon ECR<br/>Imagen Docker")]
+        EB["Elastic Beanstalk<br/>Contenedor Docker: TallerAPI"]
+        RDS[("Amazon RDS<br/>PostgreSQL")]
+    end
+
+    SW -->|"HTTP / REST"| EB
+    EB -->|"JDBC"| RDS
+    BUILD -->|"docker push"| ECR
+    DEPLOY -->|"despliega imagen"| EB
+    ECR -.->|"pull imagen"| EB
