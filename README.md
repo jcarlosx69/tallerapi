@@ -122,7 +122,7 @@ Carpintero de oficio, desarrollador Fullstack Java/Angular en transición.
 
 - GitHub: [@jcarlosx69](https://github.com/jcarlosx69)
 - Portfolio: [labjc.es](https://labjc.es)
-- LinkedIn: *(añade tu enlace aquí)*
+- LinkedIn: www.linkedin.com/in/juan-carlos-gomez-94064012a
 
 ---
 
