@@ -2,6 +2,8 @@ branch-defaults:
   default:
     environment: null
     group_suffix: null
+  main:
+    environment: null
 global:
   application_name: tallerapi
   branch: null
