@@ -5,11 +5,15 @@ name: CI/CD Pipeline - TallerAPI
 # No se dispara en pull_request para no gastar minutos de Actions ni
 # intentar desplegar código que todavía no se ha fusionado (RN explícita
 # de la fase: "no en cada PR a ramas de feature").
+# workflow_dispatch: el despliegue en AWS se lanza a mano desde la pestaña
+# Actions. El entorno está desmantelado para controlar costes, así que en
+# cada push solo se ejecutan los tests.
 # -----------------------------------------------------------------------
 on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 # Token de GITHUB_TOKEN con permisos mínimos (solo lectura del repo).
 # Este workflow no escribe en el repo ni crea releases, así que no
@@ -38,9 +42,10 @@ env:
 jobs:
   # =======================================================================
   # JOB 1 — test
-  # Ejecuta la suite completa (94 tests). Si falla, los jobs siguientes
-  # ni siquiera se encolan: ver fase5-notas-tecnicas.md para el detalle
-  # de cómo "needs:" implementa el fail-fast.
+  # Ejecuta la suite de tests (93: 46 unitarios + 47 de integración).
+  # Se excluye TallerapiApplicationTests porque carga el contexto completo
+  # y necesita una base de datos PostgreSQL real.
+  # Si falla, los jobs siguientes ni siquiera se encolan.
   # =======================================================================
   test:
     name: Ejecutar suite de tests
@@ -56,12 +61,16 @@ jobs:
           java-version: '21'
           cache: 'maven' # cachea ~/.m2/repository entre ejecuciones del workflow
 
-      - name: mvn test (47 unitarios + 47 integración)
+      - name: mvn test (46 unitarios + 47 integración)
         run: mvn test --batch-mode --no-transfer-progress -Dtest='!TallerapiApplicationTests' -DfailIfNoTests=false
 
   # =======================================================================
   # JOB 2 — build-and-push
   # Solo se ejecuta si "test" terminó en verde (needs: test).
+  # Además, solo se ejecuta al lanzar el workflow a mano (workflow_dispatch).
+  # En un push normal se salta: el repositorio de ECR no existe mientras el
+  # entorno de AWS está desmantelado, y este job fallaría aunque el código
+  # esté bien, dejando el badge en rojo.
   # Construye la imagen con el Dockerfile ya existente (sin tocarlo) y la
   # sube a ECR con dos tags: el SHA corto del commit (trazabilidad) y
   # "latest" (referencia rápida, no se usa para el deploy).
@@ -70,6 +79,7 @@ jobs:
     name: Construir imagen Docker y subir a ECR
     runs-on: ubuntu-latest
     needs: test
+    if: github.event_name == 'workflow_dispatch'
     outputs:
       image_tag: ${{ steps.vars.outputs.short_sha }}
     steps:
@@ -115,6 +125,8 @@ jobs:
   # Asume que tallerapi-prod (EB) y tallerapi-db (RDS) YA EXISTEN. Si están
   # detenidos/terminados entre sesiones, este job falla — comportamiento
   # esperado y documentado, no un bug del pipeline (ver notas técnicas).
+  # No necesita "if:" propio: depende de build-and-push (needs), así que
+  # cuando ese job se salta, este también se salta automáticamente.
   # =======================================================================
   deploy:
     name: Desplegar en Elastic Beanstalk
