@@ -156,6 +156,46 @@ class MaterialControllerIntegrationTest extends IntegrationTestBase {
 
             verify(materialRepository, never()).save(any());
         }
+
+        @Test
+        @DisplayName("deberia_devolver400ConValoresPermitidos_cuandoElTipoNoEsUnValorValido")
+        void deberia_devolver400ConValoresPermitidos_cuandoElTipoNoEsUnValorValido() throws Exception {
+            // JSON escrito a mano: un MaterialRequest no puede contener un enum
+            // inválido (no compilaría), así que no sirve objectMapper aquí.
+            String json = """
+                    {
+                      "nombre": "Tablero 9mm",
+                      "tipo": "AGLOMERADO",
+                      "unidad": "METRO",
+                      "stockDisponible": 10,
+                      "costeUnitario": 20
+                    }
+                    """;
+
+            mockMvc.perform(post("/api/v1/materiales")
+                            .header("Authorization", tokenAdmin())
+                            .contentType(APPLICATION_JSON)
+                            .content(json))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.message").value(
+                            "tipo: valor 'AGLOMERADO' no válido. Valores permitidos: MADERA, HERRAJE, BARNIZ, OTRO"));
+
+            verify(materialRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("deberia_devolver400Generico_cuandoElJsonEstaMalFormado")
+        void deberia_devolver400Generico_cuandoElJsonEstaMalFormado() throws Exception {
+            mockMvc.perform(post("/api/v1/materiales")
+                            .header("Authorization", tokenAdmin())
+                            .contentType(APPLICATION_JSON)
+                            .content("{\"nombre\": "))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.message").value(
+                            "El cuerpo de la petición no es un JSON válido o contiene valores con un tipo incorrecto"));
+
+            verify(materialRepository, never()).save(any());
+        }
     }
 
     @Nested

@@ -1,17 +1,22 @@
 package com.delamaderaalcodigo.tallerapi.exception;
 
 import com.delamaderaalcodigo.tallerapi.dto.ErrorResponse;
+import com.fasterxml.jackson.databind.JsonMappingException;
+import com.fasterxml.jackson.databind.exc.InvalidFormatException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import java.time.Instant;
+import java.util.Arrays;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
@@ -78,6 +83,40 @@ public class GlobalExceptionHandler {
                 .collect(Collectors.joining("; "));
 
         return construirRespuesta(HttpStatus.BAD_REQUEST, "Error de validación", detalle, request);
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ErrorResponse> manejarCuerpoIlegible(HttpMessageNotReadableException ex,
+                                                               HttpServletRequest request) {
+        // Spring lanza esta excepción cuando no puede convertir el cuerpo JSON
+        // al DTO: JSON mal formado, tipo incorrecto o valor de enum desconocido.
+        // Es un error del cliente (400), no del servidor: sin este manejador
+        // caía en manejarErrorGenerico y se devolvía un 500 engañoso.
+        //
+        // No se usa ex.getMessage(): el mensaje de Jackson incluye nombres
+        // internos de clases (com.delamaderaalcodigo...TipoMaterial), y la regla
+        // de este handler es no filtrar detalles internos al cliente.
+        String detalle = "El cuerpo de la petición no es un JSON válido o contiene valores con un tipo incorrecto";
+
+        // Caso concreto: valor de enum no reconocido. Spring envuelve el error
+        // original de Jackson, que viene en getCause(). Si es un enum, damos un
+        // mensaje útil con los valores admitidos, en el mismo formato
+        // "campo: motivo" que usan los errores de Bean Validation.
+        if (ex.getCause() instanceof InvalidFormatException ife && ife.getTargetType().isEnum()) {
+            String campo = ife.getPath().stream()
+                    .map(JsonMappingException.Reference::getFieldName)
+                    .filter(Objects::nonNull) // los elementos de una lista no tienen nombre de campo
+                    .collect(Collectors.joining("."));
+
+            String permitidos = Arrays.stream(ife.getTargetType().getEnumConstants())
+                    .map(Object::toString)
+                    .collect(Collectors.joining(", "));
+
+            detalle = "%s: valor '%s' no válido. Valores permitidos: %s"
+                    .formatted(campo, ife.getValue(), permitidos);
+        }
+
+        return construirRespuesta(HttpStatus.BAD_REQUEST, "Petición mal formada", detalle, request);
     }
 
     @ExceptionHandler(Exception.class)
