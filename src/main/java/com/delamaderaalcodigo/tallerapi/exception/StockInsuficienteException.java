@@ -17,8 +17,19 @@ public class StockInsuficienteException extends RuntimeException {
     }
 
     public static StockInsuficienteException de(String materialNombre, BigDecimal solicitado, BigDecimal disponible) {
+
         return new StockInsuficienteException(
                 "Stock insuficiente para \"%s\": se solicitó %s y el stock disponible es %s"
-                        .formatted(materialNombre, solicitado, disponible));
+                        .formatted(materialNombre, formatearCantidad(solicitado), formatearCantidad(disponible)));
+    }
+
+    /**
+     * Quita los ceros decimales sobrantes de la escala de BD (10.000 -> "10",
+     * 2.500 -> "2.5"). Sin esto, "10.000" se lee en español como diez mil.
+     * toPlainString() es necesario porque stripTrailingZeros() sobre un entero
+     * acabado en cero devuelve notación científica (100 -> 1E+2).
+     */
+    private static String formatearCantidad(BigDecimal cantidad) {
+        return cantidad.stripTrailingZeros().toPlainString();
     }
 }
