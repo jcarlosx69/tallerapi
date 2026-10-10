@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.exc.InvalidFormatException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.mapping.PropertyReferenceException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -119,13 +120,31 @@ public class GlobalExceptionHandler {
         return construirRespuesta(HttpStatus.BAD_REQUEST, "Petición mal formada", detalle, request);
     }
 
+    @ExceptionHandler(PropertyReferenceException.class)
+    public ResponseEntity<ErrorResponse> manejarOrdenacionInvalida(PropertyReferenceException ex,
+                                                                   HttpServletRequest request) {
+        // Spring Data lanza esta excepción cuando el parámetro "sort" de un
+        // listado paginado nombra una propiedad que no existe en la entidad
+        // (p. ej. el valor de ejemplo ["string"] que Swagger UI rellena por
+        // defecto). Es un error del cliente (400): sin este manejador caía en
+        // manejarErrorGenerico y se devolvía un 500.
+        //
+        // En tiempo de ejecución solo puede venir del parámetro sort: los
+        // métodos derivados de los repositorios (findByEstado...) se validan
+        // al arrancar la aplicación, no en cada petición.
+        String detalle = "sort: la propiedad '%s' no existe. Usa el nombre de un campo, p. ej. 'nombre' o 'nombre,desc'"
+                .formatted(ex.getPropertyName());
+
+        return construirRespuesta(HttpStatus.BAD_REQUEST, "Parámetro de ordenación inválido", detalle, request);
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> manejarErrorGenerico(Exception ex, HttpServletRequest request) {
         // Se loguea la excepción completa (con stack trace) en el servidor para
         // poder diagnosticarla, aunque NUNCA se exponga ex.getMessage() al
         // cliente: el mensaje genérico evita filtrar detalles internos (rutas
         // de fichero, SQL, stack traces) a un cliente externo.
-        log.error("Error no controlado en al procesar {} {}", request.getMethod(), request.getRequestURI(), ex);
+        log.error("Error no controlado al procesar {} {}", request.getMethod(), request.getRequestURI(), ex);
 
         return construirRespuesta(HttpStatus.INTERNAL_SERVER_ERROR, "Error interno",
                 "Ha ocurrido un error inesperado. Contacte con el administrador.", request);

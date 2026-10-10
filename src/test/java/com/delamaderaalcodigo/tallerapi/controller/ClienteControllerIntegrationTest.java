@@ -9,6 +9,8 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.PageImpl;
+import org.springframework.data.mapping.PropertyReferenceException;
+import  org.springframework.data.util.TypeInformation;
 
 import java.util.List;
 import java.util.Optional;
@@ -25,6 +27,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
 
 /**
  * Tests de integración de {@code ClienteController}: cadena completa HTTP -&gt; seguridad
@@ -57,6 +60,23 @@ class ClienteControllerIntegrationTest extends IntegrationTestBase {
                     .andExpect(jsonPath("$.content[0].id").value(1))
                     .andExpect(jsonPath("$.content[0].nombre").value("Cliente de prueba 1"))
                     .andExpect(jsonPath("$.content[0].email").value("cliente1@correo.com"));
+        }
+
+        @Test
+        @DisplayName("deberia_devolver400_cuandoElParametroSortNoEsUnaPropiedadDeLaEntidad")
+        void deberia_devolver400_cuandoElParametroSortNoEsUnaPropiedadDeLaEntidad() throws Exception {
+            // El repositorio está mockeado, así que se simula la excepción que
+            // Spring Data lanza en real (comprobado en los logs con sort=["string"]).
+            // Este test protege la traducción a 400, no el comportamiento de Spring Data.
+            when(clienteRepository.findAll(any(Pageable.class)))
+                    .thenThrow(new PropertyReferenceException("noExiste", TypeInformation.of(Cliente.class), List.of()));
+
+            mockMvc.perform(get("/api/v1/clientes")
+                            .param("sort", "noExiste")
+                            .header("Authorization", tokenAdmin()))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.message").value(
+                            "sort: la propiedad 'noExiste' no existe. Usa el nombre de un campo, p. ej. 'nombre' o 'nombre,desc'"));
         }
     }
 
