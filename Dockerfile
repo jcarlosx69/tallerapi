@@ -15,7 +15,7 @@
 # ---------- Etapa 1: build ----------
 # Imagen oficial de Maven con JDK 21 ya instalado (Eclipse Temurin).
 # Solo se usa para compilar; no llega a la imagen final.
-FROM maven:3.9-eclipse-temurin-21 AS build
+FROM docker.io/library/maven:3.9-eclipse-temurin-21 AS build
 
 WORKDIR /build
 
@@ -44,7 +44,9 @@ RUN mvn -B package -DskipTests
 # Solo el runtime (JRE), no el JDK ni Maven. Alpine como base porque
 # es una distribución mínima (~5 MB) en comparación con una base
 # Ubuntu/Debian completa.
-FROM eclipse-temurin:21-jre-alpine
+# Se usa el nombre completo para evitar la ambigüedad ya el el 
+# desarrollo de la app se está realizando con podman.
+FROM docker.io/library/eclipse-temurin:21-jre-alpine
 
 # Usuario y grupo de sistema dedicados, sin privilegios de root y sin
 # shell de login interactivo. Justificación completa en
