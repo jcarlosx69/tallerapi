@@ -42,7 +42,7 @@ env:
 jobs:
   # =======================================================================
   # JOB 1 — test
-  # Ejecuta la suite de tests (93: 46 unitarios + 47 de integración).
+  # Ejecuta la suite de tests (97: 48 unitarios + 49 de integración).
   # Se excluye TallerapiApplicationTests porque carga el contexto completo
   # y necesita una base de datos PostgreSQL real.
   # Si falla, los jobs siguientes ni siquiera se encolan.
@@ -61,7 +61,7 @@ jobs:
           java-version: '21'
           cache: 'maven' # cachea ~/.m2/repository entre ejecuciones del workflow
 
-      - name: mvn test (46 unitarios + 47 integración)
+      - name: mvn test (48 unitarios + 49 integración)
         run: mvn test --batch-mode --no-transfer-progress -Dtest='!TallerapiApplicationTests' -DfailIfNoTests=false
 
   # =======================================================================
